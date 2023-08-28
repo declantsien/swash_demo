@@ -112,7 +112,9 @@ impl FontLibraryBuilder {
             Os::Android => {}
             Os::Unix => {
                 if let Some(mut homedir) = std::env::var_os("HOME") {
-                    homedir.push("/.local/share/fonts/");
+                    // homedir.push("/.local/share/fonts/");
+                    homedir.push("/.guix-home/profile/share/fonts/");
+
                     self.add_dir(&homedir);
                 }
             }
