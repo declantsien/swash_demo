@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["chad <cbrokaw@gmail.com>"]
 edition = "2018"
 description = "Static index for system fonts"
+repository = "https://git.sr.ht/~declantsien/font-index"
 
 [dependencies]
 swash = "0.1"
