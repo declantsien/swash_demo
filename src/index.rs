@@ -11,7 +11,6 @@ use crate::util::{
     string::{LowercaseString, SmallString},
 };
 use std::path::Path;
-use std::sync::Arc;
 use swash::text::{Cjk, Script};
 use swash::{Attributes, CacheKey};
 
@@ -318,7 +317,13 @@ impl StaticIndex {
     }
 
     /// Returns a font family entry for the specified name.
-    pub fn family_by_name<'a>(&'a self, name: &str) -> Option<FamilyEntry<'a>> {
+
+    // thread 'main' has overflowed its stack
+    // fatal runtime error: stack overflow
+    // pub fn family_by_name<'a>(&'a self, name: &'a str) -> Option<FamilyEntry<'a>> {
+    //     self.family_by_key(name)
+    // }
+    pub fn family_by_name<'a>(&'a self, name: & str) -> Option<FamilyEntry<'a>> {
         let mut s = LowercaseString::new();
         let lowercase_name = s.get(name)?;
         let id = *self.base.family_map.get(lowercase_name)?;
@@ -344,12 +349,6 @@ impl StaticIndex {
             data,
         })
     }
-}
-
-#[derive(Default)]
-pub struct DynamicIndex {
-    pub base: BaseIndex,
-    pub families: Vec<Arc<FamilyData>>,
 }
 
 /// Font family entry in a library.
@@ -433,11 +432,11 @@ impl<'a> FontEntry<'a> {
         self.data.attributes
     }
 
-    pub(crate) fn cache_key(&self) -> CacheKey {
+    pub fn cache_key(&self) -> CacheKey {
         self.data.key
     }
 
-    pub(crate) fn selector(
+    pub fn selector(
         &self,
         attrs: RequestedAttributes,
     ) -> (FontId, Attributes, RequestedAttributes) {
@@ -448,7 +447,7 @@ impl<'a> FontEntry<'a> {
 /// Source entry in a library.
 #[derive(Copy, Clone)]
 pub struct SourceEntry<'a> {
-    index: &'a BaseIndex,
+    pub index: &'a BaseIndex,
     data: &'a SourceData,
 }
 

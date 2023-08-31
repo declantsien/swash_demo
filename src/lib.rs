@@ -3,9 +3,10 @@ Font management.
 */
 
 pub mod prelude;
+mod util;
 
 mod builder;
-mod context;
+pub mod context;
 mod fallback;
 mod family;
 mod index;
@@ -18,12 +19,16 @@ mod types;
 pub(crate) mod internal {
     pub use super::context::{FontContext, FontGroupId};
 }
+use std::sync::{Arc, OnceLock};
 
 pub use builder::{FontLibraryBuilder, MmapHint};
-pub use family::FamilyList;
-pub use index::{FamilyEntry, FontEntry, SourceEntry};
+pub use context::{FontCache, FontContext};
+pub use family::{parse_families, FamilyList};
+pub use index::{FamilyEntry, FontEntry, SourceEntry, StaticIndex as FontIndex};
+pub use index_data::SourceKind;
 pub use library::FontLibrary;
-pub use types::{FamilyId, FontId, SourceId, FontKey, FamilyKey};
+pub use shared_data::SharedData;
+pub use types::{FamilyId, FamilyKey, FontId, FontKey, GenericFamily, SourceId};
 
 use swash::{CacheKey, iter::*, *};
 
@@ -130,5 +135,15 @@ impl Eq for Font {}
 impl<'a> From<&'a Font> for FontRef<'a> {
     fn from(f: &'a Font) -> FontRef<'a> {
         f.as_ref()
+    }
+}
+
+static FONT_LIBRARY: OnceLock<FontLibrary> = OnceLock::new();
+
+impl FontIndex {
+    pub fn global() -> Arc<FontIndex> {
+        let library = FONT_LIBRARY.get_or_init(|| FontLibrary::default());
+
+        library.inner.index.read().unwrap().clone()
     }
 }

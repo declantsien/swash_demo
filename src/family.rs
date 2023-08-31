@@ -30,7 +30,7 @@ impl FamilyList {
         parse_families(self.names())
     }
 
-    pub(crate) fn key(&self) -> u64 {
+    pub fn key(&self) -> u64 {
         self.key
     }
 }

@@ -140,13 +140,22 @@ impl FontContext {
     }
 }
 
-struct FontCache {
-    index: Arc<StaticIndex>,
+pub struct FontCache {
+    pub index: Arc<StaticIndex>,
     sources: FxHashMap<SourceId, Option<(SharedData, Epoch)>>,
     epoch: Epoch,
 }
 
 impl FontCache {
+    pub fn default() -> Self {
+        let index = StaticIndex::global().clone();
+        FontCache {
+            index,
+            sources: FxHashMap::default(),
+            epoch: 0,
+        }
+    }
+
     /// Returns a font entry that matches the specified family and
     /// attributes.
     pub fn query<'a>(
@@ -441,30 +450,30 @@ impl GroupCache {
         self.fonts.clear();
     }
 
-    fn prune(&mut self, epoch: Epoch, target_size: usize) {
-        if self.key_map.len() <= target_size {
-            return;
-        }
-        let mut count = self.key_map.len() - target_size;
-        self.key_map.retain(|_, v| {
-            if count != 0 && v.epoch < epoch {
-                count -= 1;
-                false
-            } else {
-                true
-            }
-        });
-        if count != 0 {
-            self.key_map.retain(|_, _| {
-                if count != 0 {
-                    count -= 1;
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-    }
+    // fn prune(&mut self, epoch: Epoch, target_size: usize) {
+    //     if self.key_map.len() <= target_size {
+    //         return;
+    //     }
+    //     let mut count = self.key_map.len() - target_size;
+    //     self.key_map.retain(|_, v| {
+    //         if count != 0 && v.epoch < epoch {
+    //             count -= 1;
+    //             false
+    //         } else {
+    //             true
+    //         }
+    //     });
+    //     if count != 0 {
+    //         self.key_map.retain(|_, _| {
+    //             if count != 0 {
+    //                 count -= 1;
+    //                 false
+    //             } else {
+    //                 true
+    //             }
+    //         });
+    //     }
+    // }
 }
 
 struct CachedGroup {
@@ -480,16 +489,16 @@ enum GroupData {
 }
 
 impl GroupData {
-    fn clear(&mut self) {
-        match self {
-            Self::Inline(len, _) => {
-                *len = 0;
-            }
-            Self::Heap(vec) => {
-                vec.clear();
-            }
-        }
-    }
+    // fn clear(&mut self) {
+    //     match self {
+    //         Self::Inline(len, _) => {
+    //             *len = 0;
+    //         }
+    //         Self::Heap(vec) => {
+    //             vec.clear();
+    //         }
+    //     }
+    // }
 
     fn push(&mut self, font: FontId, attrs: Attributes) {
         match self {

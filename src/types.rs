@@ -4,10 +4,10 @@ use swash::Attributes;
 
 /// Identifier for a font in a library.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct FontId(pub(super) u32);
+pub struct FontId(pub u32);
 
 impl FontId {
-    pub(super) fn to_usize(self) -> usize {
+    pub fn to_usize(self) -> usize {
         self.0 as usize
     }
 }
@@ -27,7 +27,7 @@ impl FamilyId {
 pub struct SourceId(pub(super) u32);
 
 impl SourceId {
-    pub(super) fn to_usize(self) -> usize {
+    pub fn to_usize(self) -> usize {
         self.0 as usize
     }
 }

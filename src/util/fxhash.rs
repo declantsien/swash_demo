@@ -27,7 +27,7 @@
 //! potentially cause quadratic behavior in `HashMap`s.  So it is not recommended to expose
 //! this hash in places where collissions or DDOS attacks may be a concern.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use core::default::Default;
 use core::hash::{BuildHasherDefault, Hasher};
 use core::ops::BitXor;
