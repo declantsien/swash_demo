@@ -19,5 +19,10 @@ raw-window-handle = "0.5.0"
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))'.dependencies]
 fontconfig-parser = "0.5"
 
+[dependencies.font]
+package = "font-index"
+version = "0.1"
+default-features = false
+
 [build-dependencies]
 gl_generator = "0.14.0"

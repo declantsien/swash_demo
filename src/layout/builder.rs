@@ -2,7 +2,8 @@
 
 use super::bidi::*;
 use super::builder_data::*;
-use super::font::{internal::*, Font, FontLibrary};
+use font::{Font, FontLibrary, FontContext};
+use font::context::FontGroupId;
 use super::span_style::*;
 use super::Paragraph;
 use super::{SpanId, MAX_ID};

@@ -1,6 +1,6 @@
 use super::span_style::*;
+use font::context::{FontContext, FontGroupId};
 use super::{
-    font::internal::{FontContext, FontGroupId},
     SpanId, MAX_ID,
 };
 use core::borrow::Borrow;

@@ -1,6 +1,6 @@
 //! Experimental paragraph layout engine.
 
-pub mod font;
+// pub mod font;
 
 mod bidi;
 mod builder;

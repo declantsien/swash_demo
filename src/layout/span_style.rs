@@ -1,4 +1,4 @@
-pub use super::font::FamilyList;
+pub use font::FamilyList;
 pub use swash::text::Language;
 use swash::{Stretch, Style, Setting, Weight};
 
