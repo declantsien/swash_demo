@@ -32,7 +32,7 @@ pub struct UnderlineStyle {
 }
 
 /// Positioned glyph in a text run.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Glyph {
     /// Glyph identifier.
     pub id: GlyphId,

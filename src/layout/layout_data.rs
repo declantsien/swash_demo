@@ -17,7 +17,7 @@ pub const CLUSTER_LIGATURE: u8 = 16;
 /// Cluster is an explicit line break.
 pub const CLUSTER_NEWLINE: u8 = 32;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct ClusterData {
     pub info: ClusterInfo,
     pub flags: u8,
@@ -111,7 +111,7 @@ impl ClusterData {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct DetailedClusterData {
     /// Range in `glyphs`
     pub glyphs: (u32, u32),
@@ -121,7 +121,7 @@ pub struct DetailedClusterData {
 
 pub const GLYPH_DETAILED: u32 = 0x80000000;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct GlyphData {
     pub data: u32,
     pub span: SpanId,
@@ -159,7 +159,7 @@ impl GlyphData {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RunData {
     pub span: SpanId,
     pub line: u32,
@@ -181,7 +181,7 @@ pub struct RunData {
     pub advance: f32,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct LayoutData {
     /// Normalized variation coordinates.
     pub coords: Vec<i16>,
@@ -232,7 +232,7 @@ impl LineData {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct LineLayoutData {
     pub lines: Vec<LineData>,
     pub runs: Vec<RunData>,

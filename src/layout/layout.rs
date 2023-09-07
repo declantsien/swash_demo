@@ -363,7 +363,7 @@ impl<'a> Iterator for Runs<'a> {
 }
 
 /// Shaped glyph in a paragraph.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Glyph {
     /// Glyph identifier.
     pub id: GlyphId,

@@ -34,7 +34,7 @@ pub use span_style::*;
 use layout_data::{LayoutData, LineLayoutData};
 
 /// Collection of text, organized into lines, runs and clusters.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Paragraph {
     data: LayoutData,
     line_data: LineLayoutData,

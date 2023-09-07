@@ -2,7 +2,7 @@ use core::borrow::Borrow;
 use core::ops::Range;
 use crate::layout::*;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Document {
     pub spans: Vec<Span>,
     pub fragments: Vec<(u32, u32)>,
@@ -129,7 +129,7 @@ impl Document {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Span {
     pub properties: Vec<SpanStyle<'static>>,
     pub elements: Vec<SpanElement>,
@@ -147,7 +147,7 @@ impl Span {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum SpanElement {
     Fragment(u32),
     Span(u32),
