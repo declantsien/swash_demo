@@ -32,8 +32,8 @@ impl Paragraph {
     /// Returns an iterator over the lines in the paragraph.
     pub fn lines(&self) -> Lines {
         Lines {
-            layout: &self.data,
-            line_layout: &self.line_data,
+            layout_data: &self.data,
+            line_layout_data: &self.line_data,
             iter: self.line_data.lines.iter(),
         }
     }
@@ -258,37 +258,37 @@ impl Paragraph {
 /// Sequence of clusters sharing the same font, size and span.
 #[derive(Copy, Clone)]
 pub struct Run<'a> {
-    layout: &'a LayoutData,
-    pub(super) run: &'a RunData,
+    layout_data: &'a LayoutData,
+    pub(super) data: &'a RunData,
 }
 
 impl<'a> Run<'a> {
-    pub(super) fn new(layout: &'a LayoutData, run: &'a RunData) -> Self {
-        Self { layout, run }
+    pub(super) fn new(layout_data: &'a LayoutData, data: &'a RunData) -> Self {
+        Self { layout_data, data }
     }
     /// Returns the span that contains the run.
     pub fn span(&self) -> SpanId {
-        self.run.span
+        self.data.span
     }
 
     /// Returns the font for the run.
     pub fn font(&self) -> &Font {
-        &self.run.font
+        &self.data.font
     }
 
     /// Returns the font size for the run.
     pub fn font_size(&self) -> f32 {
-        self.run.size
+        self.data.size
     }
 
     /// Returns the bidi level of the run.
     pub fn level(&self) -> u8 {
-        self.run.level
+        self.data.level
     }
 
     /// Returns the direction of the run.
     pub fn direction(&self) -> Direction {
-        if self.run.level & 1 != 0 {
+        if self.data.level & 1 != 0 {
             Direction::RightToLeft
         } else {
             Direction::LeftToRight
@@ -297,47 +297,47 @@ impl<'a> Run<'a> {
 
     /// Returns the normalized variation coordinates for the run.
     pub fn normalized_coords(&self) -> &'a [NormalizedCoord] {
-        self.layout
+        self.layout_data
             .coords
-            .get(make_range(self.run.coords))
+            .get(make_range(self.data.coords))
             .unwrap_or(&[])
     }
 
     /// Returns the advance of the run.
     pub fn advance(&self) -> f32 {
-        self.run.advance
+        self.data.advance
     }
 
     /// Returns true if the run has an underline decoration.
     pub fn underline(&self) -> bool {
-        self.run.underline
+        self.data.underline
     }
 
     /// Returns the underline offset for the run.
     pub fn underline_offset(&self) -> f32 {
-        self.run.underline_offset
+        self.data.underline_offset
     }
 
     /// Returns the underline size for the run.
     pub fn underline_size(&self) -> f32 {
-        self.run.underline_size
+        self.data.underline_size
     }
 
     /// Returns an iterator over the clusters in logical order.
     pub fn clusters(&self) -> Clusters<'a> {
         Clusters {
-            layout: self.layout,
-            iter: self.layout.clusters[make_range(self.run.clusters)].iter(),
+            layout_data: self.layout_data,
+            iter: self.layout_data.clusters[make_range(self.data.clusters)].iter(),
             rev: false,
         }
     }
 
     /// Returns an iterator over the clusters in visual order.
     pub fn visual_clusters(&self) -> Clusters<'a> {
-        let rev = self.run.level & 1 != 0;
+        let rev = self.data.level & 1 != 0;
         Clusters {
-            layout: self.layout,
-            iter: self.layout.clusters[make_range(self.run.clusters)].iter(),
+            layout_data: self.layout_data,
+            iter: self.layout_data.clusters[make_range(self.data.clusters)].iter(),
             rev,
         }
     }
@@ -356,8 +356,8 @@ impl<'a> Iterator for Runs<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let run = self.iter.next()?;
         Some(Run {
-            layout: self.layout,
-            run,
+            layout_data: self.layout,
+            data: run,
         })
     }
 }
@@ -443,74 +443,74 @@ impl<'a> DoubleEndedIterator for Glyphs<'a> {
 /// Collection of glyphs representing an atomic textual unit.
 #[derive(Copy, Clone)]
 pub struct Cluster<'a> {
-    layout: &'a LayoutData,
-    cluster: ClusterData,
+    layout_data: &'a LayoutData,
+    data: ClusterData,
 }
 
 impl<'a> Cluster<'a> {
-    pub(super) fn new(layout: &'a LayoutData, cluster: ClusterData) -> Self {
-        Self { layout, cluster }
+    pub(super) fn new(layout_data: &'a LayoutData, data: ClusterData) -> Self {
+        Self { layout_data, data }
     }
 
     /// Returns the cluster information.
     pub fn info(&self) -> ClusterInfo {
-        self.cluster.info
+        self.data.info
     }
 
     /// Returns true if the cluster is empty. This occurs when ignorable
     /// glyphs are removed by the shaper.
     pub fn is_empty(&self) -> bool {
-        self.cluster.is_empty()
+        self.data.is_empty()
     }
 
     /// Returns true if the cluster is a ligature.
     pub fn is_ligature(&self) -> bool {
-        self.cluster.is_ligature()
+        self.data.is_ligature()
     }
 
     /// Returns true if the cluster is a continuation of a ligature.
     pub fn is_continuation(&self) -> bool {
-        self.cluster.is_continuation()
+        self.data.is_continuation()
     }
 
     /// Returns true if the cluster is the final continuation of a ligature.
     pub fn is_last_continuation(&self) -> bool {
-        self.cluster.is_last_continuation()
+        self.data.is_last_continuation()
     }
 
     /// Returns true if the following cluster is a mandatory line break.
     pub fn is_newline(&self) -> bool {
-        self.cluster.is_newline()
+        self.data.is_newline()
     }
 
     /// Returns the byte offset of the cluster in the source text.
     pub fn offset(&self) -> usize {
-        self.cluster.offset as usize
+        self.data.offset as usize
     }
 
     /// Returns the byte range of the cluster in the source text.
     pub fn range(&self) -> Range<usize> {
-        let start = self.cluster.offset as usize;
-        start..start + self.cluster.len as usize
+        let start = self.data.offset as usize;
+        start..start + self.data.len as usize
     }
 
     /// Returns an iterator over the glyphs for the cluster.
     pub fn glyphs(&self) -> Glyphs<'a> {
         let glyphs = self
-            .cluster
-            .glyphs(&self.layout.detailed_clusters, &self.layout.glyphs);
+            .data
+            .glyphs(&self.layout_data.detailed_clusters, &self.layout_data.glyphs);
         Glyphs {
-            layout: self.layout,
+            layout: self.layout_data,
             iter: glyphs.iter(),
         }
     }
 
     /// Returns the advance of the cluster.
     pub fn advance(&self) -> f32 {
-        self.cluster.advance(
-            &self.layout.detailed_clusters,
-            &self.layout.glyphs,
-            &self.layout.detailed_glyphs,
+        self.data.advance(
+            &self.layout_data.detailed_clusters,
+            &self.layout_data.glyphs,
+            &self.layout_data.detailed_glyphs,
         )
     }
 }
@@ -518,7 +518,7 @@ impl<'a> Cluster<'a> {
 /// Iterator over the clusters in a run.
 #[derive(Clone)]
 pub struct Clusters<'a> {
-    layout: &'a LayoutData,
+    layout_data: &'a LayoutData,
     iter: core::slice::Iter<'a, ClusterData>,
     rev: bool,
 }
@@ -533,8 +533,8 @@ impl<'a> Iterator for Clusters<'a> {
             self.iter.next()?
         };
         Some(Cluster {
-            layout: self.layout,
-            cluster: *data,
+            layout_data: self.layout_data,
+            data: *data,
         })
     }
 }
@@ -543,8 +543,8 @@ impl<'a> DoubleEndedIterator for Clusters<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let data = self.iter.next_back()?;
         Some(Cluster {
-            layout: self.layout,
-            cluster: *data,
+            layout_data: self.layout_data,
+            data: *data,
         })
     }
 }
@@ -552,67 +552,67 @@ impl<'a> DoubleEndedIterator for Clusters<'a> {
 /// Collection of runs occupying a single line in a paragraph.
 #[derive(Copy, Clone)]
 pub struct Line<'a> {
-    layout: &'a LayoutData,
-    line_layout: &'a LineLayoutData,
-    line: &'a LineData,
+    layout_data: &'a LayoutData,
+    line_layout_data: &'a LineLayoutData,
+    data: &'a LineData,
 }
 
 impl<'a> Line<'a> {
-    pub(super) fn new(layout: &'a Paragraph, line_index: usize) -> Self {
+    pub(super) fn new(paragraph: &'a Paragraph, line_index: usize) -> Self {
         Self {
-            layout: &layout.data,
-            line_layout: &layout.line_data,
-            line: &layout.line_data.lines[line_index],
+            layout_data: &paragraph.data,
+            line_layout_data: &paragraph.line_data,
+            data: &paragraph.line_data.lines[line_index],
         }
     }
 
     /// Returns the offset in line direction.
     pub fn offset(&self) -> f32 {
-        self.line.x
+        self.data.x
     }
 
     /// Returns the baseline offset.
     pub fn baseline(&self) -> f32 {
-        self.line.baseline
+        self.data.baseline
     }
 
     /// Returns the ascent of the line.
     pub fn ascent(&self) -> f32 {
-        self.line.ascent
+        self.data.ascent
     }
 
     /// Returns the descent of the line.
     pub fn descent(&self) -> f32 {
-        self.line.descent
+        self.data.descent
     }
 
     /// Returns the leading of the line.
     pub fn leading(&self) -> f32 {
-        self.line.leading
+        self.data.leading
     }
 
     /// Returns the total advance of the line.
     pub fn advance(&self) -> f32 {
-        self.line.width
+        self.data.width
     }
 
     /// Returns the total advance of the line excluding trailing whitespace.
     pub fn advance_without_trailing_whitespace(&self) -> f32 {
-        let mut advance = self.line.width;
-        for run in self.line_layout.runs[make_range(self.line.runs)]
+        let mut advance = self.data.width;
+        for run in self.line_layout_data.runs[make_range(self.data.runs)]
             .iter()
             .rev()
         {
             if !run.trailing_whitespace {
                 break;
             }
-            for cluster in self.layout.clusters[make_range(run.clusters)].iter().rev() {
+            for cluster in self.layout_data.clusters[make_range(run.clusters)].iter().rev() {
                 if !cluster.info.is_whitespace() {
                     break;
                 }
                 advance -= Cluster {
-                    layout: self.layout,
-                    cluster: *cluster,
+                    layout_data: self.layout_data,
+                    data: *cluster,
                 }
                 .advance();
             }
@@ -623,28 +623,28 @@ impl<'a> Line<'a> {
     /// Returns the size of the line (height for horizontal and width
     /// for vertical layouts).
     pub fn size(&self) -> f32 {
-        self.line.ascent + self.line.descent + self.line.leading
+        self.data.ascent + self.data.descent + self.data.leading
     }
 
     /// Returns an iterator over the runs of the line.
     pub fn runs(&self) -> Runs<'a> {
-        let range = self.line.runs.0 as usize..self.line.runs.1 as usize;
+        let range = self.data.runs.0 as usize..self.data.runs.1 as usize;
         Runs {
-            layout: self.layout,
-            iter: self.line_layout.runs[range].iter(),
+            layout: self.layout_data,
+            iter: self.line_layout_data.runs[range].iter(),
         }
     }
 
     pub(super) fn data(&self) -> &'a LineData {
-        self.line
+        self.data
     }
 }
 
 /// Iterator over the lines of a paragraph.
 #[derive(Clone)]
 pub struct Lines<'a> {
-    layout: &'a LayoutData,
-    line_layout: &'a LineLayoutData,
+    layout_data: &'a LayoutData,
+    line_layout_data: &'a LineLayoutData,
     iter: core::slice::Iter<'a, LineData>,
 }
 
@@ -654,9 +654,9 @@ impl<'a> Iterator for Lines<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let line = self.iter.next()?;
         Some(Line {
-            layout: self.layout,
-            line_layout: self.line_layout,
-            line,
+            layout_data: self.layout_data,
+            line_layout_data: self.line_layout_data,
+            data: line,
         })
     }
 }

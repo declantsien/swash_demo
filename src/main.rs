@@ -90,9 +90,9 @@ fn main() {
     let mut dpi = window.scale_factor() as f32;
     let mut margin = MARGIN * dpi;
     let fonts = layout::FontLibrary::default();
-    let mut lcx = LayoutContext::new(&fonts);
+    let mut layout_context = LayoutContext::new(&fonts);
     let initial_size = window.inner_size();
-    let mut layout = Paragraph::new();
+    let mut paragraph = Paragraph::new();
     let mut doc = build_document();
     let mut first_run = true;
     let mut selection = Selection::default();
@@ -152,7 +152,7 @@ fn main() {
                     my = position.y as f32;
                     if selecting {
                         selection =
-                            selection.extend_to(&layout, mx - margin, my - margin, extend_to);
+                            selection.extend_to(&paragraph, mx - margin, my - margin, extend_to);
                         selection_changed = true;
                         cursor_time = 0.;
                         cursor_on = true;
@@ -180,13 +180,13 @@ fn main() {
                         let y = my - margin;
                         selection = if clicks == 2 {
                             extend_to = ExtendTo::Word;
-                            Selection::word_from_point(&layout, x, y)
+                            Selection::word_from_point(&paragraph, x, y)
                         } else if clicks == 3 {
                             extend_to = ExtendTo::Line;
-                            Selection::line_from_point(&layout, x, y)
+                            Selection::line_from_point(&paragraph, x, y)
                         } else {
                             extend_to = ExtendTo::Point;
-                            Selection::from_point(&layout, x, y)
+                            Selection::from_point(&paragraph, x, y)
                         };
                         selecting = true;
                         selection_changed = true;
@@ -204,7 +204,7 @@ fn main() {
                         return;
                     }
                     if !selection.is_collapsed() {
-                        if let Some(erase) = selection.erase(&layout) {
+                        if let Some(erase) = selection.erase(&paragraph) {
                             if let Some(offset) = doc.erase(erase) {
                                 inserted = Some(offset);
                                 if let Some(offs) = doc.insert(offset, ch) {
@@ -214,7 +214,7 @@ fn main() {
                             }
                         }
                     } else {
-                        let place = selection.offset(&layout);
+                        let place = selection.offset(&paragraph);
                         if let Some(offs) = doc.insert(place, ch) {
                             inserted = Some(offs);
                         }
@@ -237,7 +237,7 @@ fn main() {
                             Return => {
                                 let ch = '\n';
                                 if !selection.is_collapsed() {
-                                    if let Some(erase) = selection.erase(&layout) {
+                                    if let Some(erase) = selection.erase(&paragraph) {
                                         if let Some(offset) = doc.erase(erase) {
                                             inserted = Some(offset);
                                             if let Some(offs) = doc.insert(offset, ch) {
@@ -247,7 +247,7 @@ fn main() {
                                         }
                                     }
                                 } else {
-                                    let place = selection.offset(&layout);
+                                    let place = selection.offset(&paragraph);
                                     if let Some(offs) = doc.insert(place, ch) {
                                         inserted = Some(offs);
                                     }
@@ -255,7 +255,7 @@ fn main() {
                                 }
                             }
                             Back => {
-                                if let Some(erase) = selection.erase_previous(&layout) {
+                                if let Some(erase) = selection.erase_previous(&paragraph) {
                                     if let Some(offset) = doc.erase(erase) {
                                         inserted = Some(offset);
                                         needs_update = true;
@@ -263,7 +263,7 @@ fn main() {
                                 }
                             }
                             Delete => {
-                                if let Some(erase) = selection.erase(&layout) {
+                                if let Some(erase) = selection.erase(&paragraph) {
                                     if let Some(offset) = doc.erase(erase) {
                                         inserted = Some(offset);
                                         needs_update = true;
@@ -273,7 +273,7 @@ fn main() {
                             C => {
                                 if ctrl || cmd {
                                     let text =
-                                        doc.get_selection(selection.normalized_range(&layout));
+                                        doc.get_selection(selection.normalized_range(&paragraph));
                                     clipboard.set_string_contents(text).ok();
                                 }
                             }
@@ -281,7 +281,7 @@ fn main() {
                                 if ctrl || cmd {
                                     if let Ok(text) = clipboard.get_string_contents() {
                                         if !selection.is_collapsed() {
-                                            if let Some(erase) = selection.erase(&layout) {
+                                            if let Some(erase) = selection.erase(&paragraph) {
                                                 if let Some(offset) = doc.erase(erase) {
                                                     inserted = Some(offset);
                                                     if let Some(offs) =
@@ -293,7 +293,7 @@ fn main() {
                                                 }
                                             }
                                         } else {
-                                            let place = selection.offset(&layout);
+                                            let place = selection.offset(&paragraph);
                                             if let Some(offs) = doc.insert_str(place, &text) {
                                                 inserted = Some(offs);
                                             }
@@ -306,9 +306,9 @@ fn main() {
                                 if ctrl || cmd {
                                     if !selection.is_collapsed() {
                                         let text =
-                                            doc.get_selection(selection.normalized_range(&layout));
+                                            doc.get_selection(selection.normalized_range(&paragraph));
                                         clipboard.set_string_contents(text).ok();
-                                        if let Some(erase) = selection.erase(&layout) {
+                                        if let Some(erase) = selection.erase(&paragraph) {
                                             if let Some(offset) = doc.erase(erase) {
                                                 inserted = Some(offset);
                                                 needs_update = true;
@@ -336,7 +336,7 @@ fn main() {
                             F7 => {
                                 let mut clusters = Vec::new();
                                 let mut u = 0;
-                                for line in layout.lines() {
+                                for line in paragraph.lines() {
                                     for run in line.runs() {
                                         for (i, cluster) in run.visual_clusters().enumerate() {
                                             clusters.push((cluster, u, line.baseline()));
@@ -371,34 +371,34 @@ fn main() {
                             }
                             Left => {
                                 selection = if cmd {
-                                    selection.home(&layout, shift)
+                                    selection.home(&paragraph, shift)
                                 } else {
-                                    selection.previous(&layout, shift)
+                                    selection.previous(&paragraph, shift)
                                 };
                                 selection_changed = true;
                             }
                             Right => {
                                 selection = if cmd {
-                                    selection.end(&layout, shift)
+                                    selection.end(&paragraph, shift)
                                 } else {
-                                    selection.next(&layout, shift)
+                                    selection.next(&paragraph, shift)
                                 };
                                 selection_changed = true;
                             }
                             Home => {
-                                selection = selection.home(&layout, shift);
+                                selection = selection.home(&paragraph, shift);
                                 selection_changed = true;
                             }
                             End => {
-                                selection = selection.end(&layout, shift);
+                                selection = selection.end(&paragraph, shift);
                                 selection_changed = true;
                             }
                             Up => {
-                                selection = selection.previous_line(&layout, shift);
+                                selection = selection.previous_line(&paragraph, shift);
                                 selection_changed = true;
                             }
                             Down => {
-                                selection = selection.next_line(&layout, shift);
+                                selection = selection.next_line(&paragraph, shift);
                                 selection_changed = true;
                             }
                             _ => {}
@@ -451,33 +451,33 @@ fn main() {
                     needs_update = true;
                 }
                 if needs_update {
-                    let mut lb = lcx.builder(Direction::LeftToRight, None, dpi);
+                    let mut lb = layout_context.builder(Direction::LeftToRight, None, dpi);
                     doc.layout(&mut lb);
-                    layout.clear();
-                    lb.build_into(&mut layout);
+                    paragraph.clear();
+                    lb.build_into(&mut paragraph);
                     if first_run {
-                        selection = Selection::from_point(&layout, 0., 0.);
+                        selection = Selection::from_point(&paragraph, 0., 0.);
                     }
                     first_run = false;
-                    //layout.build_new_clusters();
+                    //paragraph.build_new_clusters();
                     needs_update = false;
                     size_changed = true;
                     selection_changed = true;
                 }
                 if size_changed {
                     let lw = w as f32 - margin * 2.;
-                    layout.break_lines().break_remaining(lw, align);
+                    paragraph.break_lines().break_remaining(lw, align);
                     size_changed = false;
                     selection_changed = true;
                 }
                 if let Some(offs) = inserted {
-                    selection = Selection::from_offset(&layout, offs);
+                    selection = Selection::from_offset(&paragraph, offs);
                 }
                 inserted = None;
 
                 if selection_changed {
                     selection_rects.clear();
-                    selection.regions_with(&layout, |r| {
+                    selection.regions_with(&paragraph, |r| {
                         selection_rects.push(r);
                     });
                     selection_changed = false;
@@ -490,7 +490,7 @@ fn main() {
                 };
 
                 comp.begin();
-                draw_layout(&mut comp, &layout, margin, margin, 512., fg);
+                draw_layout(&mut comp, &paragraph, margin, margin, 512., fg);
 
                 for r in &selection_rects {
                     let rect = [r[0] + margin, r[1] + margin, r[2], r[3]];
@@ -501,7 +501,7 @@ fn main() {
                     }
                 }
 
-                let (pt, ch, rtl) = selection.cursor(&layout);
+                let (pt, ch, rtl) = selection.cursor(&paragraph);
                 if ch != 0. && cursor_on {
                     let rect = [pt[0].round() + margin, pt[1].round() + margin, 1. * dpi, ch];
                     comp.draw_rect(rect, 0.1, fg);
@@ -530,14 +530,14 @@ fn main() {
 
 fn draw_layout(
     comp: &mut comp::Compositor,
-    layout: &Paragraph,
+    paragraph: &Paragraph,
     x: f32,
     y: f32,
     depth: f32,
     color: Color,
 ) {
     let mut glyphs = Vec::new();
-    for line in layout.lines() {
+    for line in paragraph.lines() {
         let mut px = x + line.offset();
         for run in line.runs() {
             use comp::text::*;
