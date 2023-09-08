@@ -164,7 +164,7 @@ pub struct RunData {
     pub span: SpanId,
     pub line: u32,
     pub font: Font,
-    pub coords: (u32, u32),
+    pub coords_range: (u32, u32),
     pub size: f32,
     pub level: u8,
     pub whitespace: bool,
@@ -183,8 +183,8 @@ pub struct RunData {
 
 #[derive(Clone, Default, Debug)]
 pub struct LayoutData {
-    /// Normalized variation coordinates.
-    pub coords: Vec<i16>,
+    /// Runs normalized variation coordinates appended together.
+    pub coords_data: Vec<i16>,
     /// Simple glyphs.
     pub glyphs: Vec<GlyphData>,
     /// Detailed glyphs.
@@ -201,7 +201,7 @@ pub struct LayoutData {
 
 impl LayoutData {
     pub fn clear(&mut self) {
-        self.coords.clear();
+        self.coords_data.clear();
         self.glyphs.clear();
         self.detailed_glyphs.clear();
         self.clusters.clear();

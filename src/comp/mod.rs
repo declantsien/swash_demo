@@ -94,10 +94,10 @@ impl Compositor {
     }
 
     /// Draws a text run.
-    pub fn draw_glyphs<I>(&mut self, rect: impl Into<Rect>, depth: f32, style: &TextRunStyle, glyphs: I)
+    pub fn draw_glyphs<I>(&mut self, rect: impl Into<Rect>, depth: f32, style: &TextRunStyle, positioned_glyphs: I)
     where
         I: Iterator,
-        I::Item: Borrow<Glyph>,
+        I::Item: Borrow<PositionedGlyph>,
     {
         let rect = rect.into();
         let (underline, underline_offset, underline_size, underline_color) = match style.underline {
@@ -119,35 +119,35 @@ impl Compositor {
         let subpx_bias = (0.125, 0.);    
         let color = style.color;    
         let x = rect.x;
-        for g in glyphs {           
-            let glyph = g.borrow();
-            let entry = session.get(glyph.id, glyph.x, glyph.y);
-            if let Some(entry) = entry {
-                if let Some(img) = session.get_image(entry.image) {
-                    let gx = (glyph.x + subpx_bias.0).floor() + entry.left as f32;
-                    let gy = (glyph.y + subpx_bias.1).floor() - entry.top as f32;
-                    if entry.is_bitmap {
+        for positioned_glyph in positioned_glyphs {
+            let positioned_glyph = positioned_glyph.borrow();
+            let rasterized_glyph = session.get(positioned_glyph.id, positioned_glyph.x, positioned_glyph.y);
+            if let Some(rasterized_glyph) = rasterized_glyph {
+                if let Some(location) = session.get_image_location(rasterized_glyph.image_id) {
+                    let gx = (positioned_glyph.x + subpx_bias.0).floor() + rasterized_glyph.left as f32;
+                    let gy = (positioned_glyph.y + subpx_bias.1).floor() - rasterized_glyph.top as f32;
+                    if rasterized_glyph.is_bitmap {
                         self.batch_manager.add_image_rect(
-                            &Rect::new(gx, gy, entry.width as f32, entry.height as f32),
+                            &Rect::new(gx, gy, rasterized_glyph.width as f32, rasterized_glyph.height as f32),
                             depth,
                             color::WHITE,
-                            &[img.min.0, img.min.1, img.max.0, img.max.1],
-                            img.texture_id,
-                            entry.image.has_alpha(),
+                            &[location.min.0, location.min.1, location.max.0, location.max.1],
+                            location.texture_id,
+                            rasterized_glyph.image_id.has_alpha(),
                         );
                     } else {
                         self.batch_manager.add_mask_rect(
-                            &Rect::new(gx, gy, entry.width as f32, entry.height as f32),
+                            &Rect::new(gx, gy, rasterized_glyph.width as f32, rasterized_glyph.height as f32),
                             depth,
                             color,
-                            &[img.min.0, img.min.1, img.max.0, img.max.1],
-                            img.texture_id,
+                            &[location.min.0, location.min.1, location.max.0, location.max.1],
+                            location.texture_id,
                             true,
                         );
                     }
                     if underline {
-                        if entry.top - underline_offset < entry.height as i32 {
-                            if let Some(mut desc_ink) = entry.desc.range() {
+                        if rasterized_glyph.top - underline_offset < rasterized_glyph.height as i32 {
+                            if let Some(mut desc_ink) = rasterized_glyph.desc.range() {
                                 desc_ink.0 += gx;
                                 desc_ink.1 += gx;
                                 self.intercepts.push(desc_ink);

@@ -551,7 +551,7 @@ fn draw_layout(
                     let x = px + glyph.x;
                     let y = py - glyph.y;
                     px += glyph.advance;
-                    glyphs.push(Glyph { id: glyph.id, x, y });
+                    glyphs.push(PositionedGlyph { id: glyph.id, x, y });
                 }
             }
             let style = TextRunStyle {

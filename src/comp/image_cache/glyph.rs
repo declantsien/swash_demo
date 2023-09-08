@@ -19,8 +19,8 @@ const SOURCES: &'static [Source] = &[
 
 pub struct GlyphCache {
     scx: ScaleContext,
-    fonts: HashMap<FontKey, FontEntry>,
-    img: GlyphImage,
+    fonts: HashMap<FontEntryKey, FontEntry>,
+    glyph_image: GlyphImage,
 }
 
 impl GlyphCache {
@@ -28,42 +28,42 @@ impl GlyphCache {
         GlyphCache {
             scx: ScaleContext::new(),
             fonts: HashMap::default(),
-            img: GlyphImage::new(),
+            glyph_image: GlyphImage::new(),
         }
     }
 
     pub fn session<'a>(
         &'a mut self,
         epoch: Epoch,
-        images: &'a mut ImageCache,
+        image_cache: &'a mut ImageCache,
         font: FontRef<'a>,
         coords: &[i16],
         size: f32,
     ) -> GlyphCacheSession<'a> {
         let quant_size = (size * 32.) as u16;
-        let entry = get_entry(&mut self.fonts, font.key.value(), coords);
-        entry.epoch = epoch;
+        let font_entry = get_font_entry(&mut self.fonts, font.key.value(), coords);
+        font_entry.epoch = epoch;
         let scaler = self.scx.builder(font)
             .hint(!IS_MACOS)
             .size(size)
             .normalized_coords(coords)
             .build();
         GlyphCacheSession {
-            entry,
+            font_entry,
             epoch,
-            images,
+            image_cache,
             scaler,
-            scaled_image: &mut self.img,
+            scaled_image: &mut self.glyph_image,
             quant_size,
         }        
     }
 
-    pub fn prune(&mut self, epoch: Epoch, images: &mut ImageCache) {
+    pub fn prune(&mut self, epoch: Epoch, image_cache: &mut ImageCache) {
         if let Some(time) = epoch.0.checked_sub(8) {
             self.fonts.retain(|_, entry| {
                 if entry.epoch.0 < time {
-                    for glyph in &entry.glyphs {
-                        images.deallocate(glyph.1.image);
+                    for glyph in &entry.rasterized_glyphs {
+                        image_cache.deallocate(glyph.1.image_id);
                     }
                     false
                 } else {
@@ -73,15 +73,15 @@ impl GlyphCache {
         }
     }
 
-    pub fn clear_evicted(&mut self, images: &mut ImageCache) {
+    pub fn clear_evicted(&mut self, image_cache: &mut ImageCache) {
         self.fonts.retain(|_, entry| {
-            entry.glyphs.retain(|_, g| images.is_valid(g.image));
-            !entry.glyphs.is_empty()
+            entry.rasterized_glyphs.retain(|_, rasterized_glyph| image_cache.is_valid(rasterized_glyph.image_id));
+            !entry.rasterized_glyphs.is_empty()
         });
     }
 }
 
-fn get_entry<'a>(fonts: &'a mut HashMap<FontKey, FontEntry>, id: u64, coords: &[i16]) -> &'a mut FontEntry {
+fn get_font_entry<'a>(fonts: &'a mut HashMap<FontEntryKey, FontEntry>, id: u64, coords: &[i16]) -> &'a mut FontEntry {
     let key = (id, Coords::Ref(coords));
     if let Some(entry) = fonts.get_mut(&key) {
         // Remove this unsafe when Rust learns that early returns should not
@@ -90,43 +90,45 @@ fn get_entry<'a>(fonts: &'a mut HashMap<FontKey, FontEntry>, id: u64, coords: &[
         // lookup here can be removed altogether)
         return unsafe { core::mem::transmute(entry) };
     }
-    let key = FontKey {
+    let key = FontEntryKey {
         key: (id, Coords::new(coords)), 
     };        
     fonts.entry(key).or_default()
 }
 
 pub struct GlyphCacheSession<'a> {
-    entry: &'a mut FontEntry,
+    font_entry: &'a mut FontEntry,
     epoch: Epoch,
-    images: &'a mut ImageCache,
+    image_cache: &'a mut ImageCache,
     scaler: Scaler<'a>,
     scaled_image: &'a mut GlyphImage,
     quant_size: u16,    
 }
 
 impl<'a> GlyphCacheSession<'a> {
-    pub fn get_image(&mut self, image: ImageId) -> Option<ImageLocation> {
-        self.images.get(self.epoch, image)
+    pub fn get_image_location(&mut self, image: ImageId) -> Option<ImageLocation> {
+        self.image_cache.get(self.epoch, image)
     }
   
-    pub fn get(&mut self, id: u16, x: f32, y: f32) -> Option<GlyphEntry> {
+    pub fn get(&mut self, id: u16, x: f32, y: f32) -> Option<RasterizedGlyph> {
         let subpx = [SubpixelOffset::quantize(x), SubpixelOffset::quantize(y)];
-        let key = GlyphKey {
+        let key = RasterizedGlyphKey {
             id,
             subpx,
             size: self.quant_size,
         };
-        if let Some(glyph) = self.entry.glyphs.get(&key) {
-            if self.images.is_valid(glyph.image) {
+        if let Some(glyph) = self.font_entry.rasterized_glyphs.get(&key) {
+            if self.image_cache.is_valid(glyph.image_id) {
                 return Some(*glyph);
             }
         }
         self.scaled_image.data.clear();
         let embolden = if IS_MACOS { 0.25 } else { 0. };
+        let offset = Vector::new(subpx[0].to_f32(), subpx[1].to_f32());
+
         if Render::new(SOURCES)
             .format(Format::CustomSubpixel([0.3, 0., -0.3]))
-            .offset(Vector::new(subpx[0].to_f32(), subpx[1].to_f32()))
+            .offset(offset)
             .embolden(embolden)
             .render_into(&mut self.scaler, id, self.scaled_image) 
         {
@@ -141,17 +143,17 @@ impl<'a> GlyphCacheSession<'a> {
                 evictable: true,
                 data: ImageData::Borrowed(&self.scaled_image.data),
             };
-            let image = self.images.allocate(self.epoch, req)?;
-            let entry = GlyphEntry {
+            let image = self.image_cache.allocate(self.epoch, req)?;
+            let entry = RasterizedGlyph {
                 left: p.left,
                 top: p.top,
                 width: w,
                 height: h,
-                image,
+                image_id: image,
                 is_bitmap: self.scaled_image.content == Content::Color,
                 desc: DescenderRegion::new(&self.scaled_image),
             };
-            self.entry.glyphs.insert(key, entry);
+            self.font_entry.rasterized_glyphs.insert(key, entry);
             return Some(entry);
         }
 
@@ -160,11 +162,11 @@ impl<'a> GlyphCacheSession<'a> {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct FontKey {
+struct FontEntryKey {
     key: (u64, Coords<'static>)
 }
 
-impl<'a> Borrow<(u64, Coords<'a>)> for FontKey {
+impl<'a> Borrow<(u64, Coords<'a>)> for FontEntryKey {
     fn borrow(&self) -> &(u64, Coords<'a>) {
         &self.key
     }
@@ -173,7 +175,7 @@ impl<'a> Borrow<(u64, Coords<'a>)> for FontKey {
 #[derive(Default, Debug)]
 struct FontEntry {
     epoch: Epoch,
-    glyphs: HashMap<GlyphKey, GlyphEntry>,
+    rasterized_glyphs: HashMap<RasterizedGlyphKey, RasterizedGlyph>,
 }
 
 #[derive(Clone, Debug)]
@@ -226,19 +228,19 @@ impl Hash for Coords<'_> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-struct GlyphKey {
+struct RasterizedGlyphKey {
     id: u16,
     subpx: [SubpixelOffset; 2],
     size: u16,
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct GlyphEntry {
+pub struct RasterizedGlyph {
     pub left: i32,
     pub top: i32,
     pub width: u16,
     pub height: u16,
-    pub image: ImageId,
+    pub image_id: ImageId,
     pub is_bitmap: bool,
     pub desc: DescenderRegion,
 }

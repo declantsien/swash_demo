@@ -1,4 +1,4 @@
-use swash::{FontRef, GlyphId, NormalizedCoord};
+use swash::{FontRef, GlyphId, NormalizedCoord, zeno::Vector};
 use super::Color;
 
 /// Properties for a text run.
@@ -33,7 +33,7 @@ pub struct UnderlineStyle {
 
 /// Positioned glyph in a text run.
 #[derive(Copy, Clone, Debug)]
-pub struct Glyph {
+pub struct PositionedGlyph {
     /// Glyph identifier.
     pub id: GlyphId,
     /// X offset of the glyph.
@@ -41,4 +41,3 @@ pub struct Glyph {
     /// Y offset of the glyph.
     pub y: f32,
 }
-

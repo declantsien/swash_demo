@@ -47,11 +47,11 @@ impl Paragraph {
 
 impl Paragraph {
     pub(super) fn push_run<'a>(&mut self, spans: &[SpanData], font: Font, size: f32, level: u8, shaper: Shaper<'a>) {
-        let coords_start = self.data.coords.len() as u32;
+        let coords_start = self.data.coords_data.len() as u32;
         self.data
-            .coords
+            .coords_data
             .extend_from_slice(shaper.normalized_coords());
-        let coords_end = self.data.coords.len() as u32;
+        let coords_end = self.data.coords_data.len() as u32;
         let mut clusters_start = self.data.clusters.len() as u32;
         let metrics = shaper.metrics();
         let mut advance = 0.;
@@ -74,7 +74,7 @@ impl Paragraph {
                         span: SpanId(last_span),
                         line: 0,
                         font: font.clone(),
-                        coords: (coords_start, coords_end),
+                        coords_range: (coords_start, coords_end),
                         size,
                         level,
                         whitespace: false,
@@ -165,7 +165,7 @@ impl Paragraph {
             span: SpanId(last_span),
             line: 0,
             font,
-            coords: (coords_start, coords_end),
+            coords_range: (coords_start, coords_end),
             size,
             level,
             whitespace: false,
@@ -298,8 +298,8 @@ impl<'a> Run<'a> {
     /// Returns the normalized variation coordinates for the run.
     pub fn normalized_coords(&self) -> &'a [NormalizedCoord] {
         self.layout_data
-            .coords
-            .get(make_range(self.data.coords))
+            .coords_data
+            .get(make_range(self.data.coords_range))
             .unwrap_or(&[])
     }
 
