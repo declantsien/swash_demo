@@ -170,7 +170,7 @@ impl<'a> Borrow<(u64, Coords<'a>)> for FontKey {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct FontEntry {
     epoch: Epoch,
     glyphs: HashMap<GlyphKey, GlyphEntry>,

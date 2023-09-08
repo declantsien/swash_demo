@@ -27,7 +27,7 @@ pub use cache::ImageCache;
 pub use glyph::{GlyphCache, GlyphCacheSession, GlyphEntry};
 
 /// Frame counter for managing resource lifetimes.
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Epoch(pub(crate) u64);
 
 /// Identifier for a texture in GPU memory.
