@@ -346,7 +346,7 @@ impl<'a> Run<'a> {
 /// Iterator over the runs in a paragraph.
 #[derive(Clone)]
 pub struct Runs<'a> {
-    layout: &'a LayoutData,
+    layout_data: &'a LayoutData,
     iter: core::slice::Iter<'a, RunData>,
 }
 
@@ -356,7 +356,7 @@ impl<'a> Iterator for Runs<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let run = self.iter.next()?;
         Some(Run {
-            layout_data: self.layout,
+            layout_data: self.layout_data,
             data: run,
         })
     }
@@ -630,7 +630,7 @@ impl<'a> Line<'a> {
     pub fn runs(&self) -> Runs<'a> {
         let range = self.data.runs.0 as usize..self.data.runs.1 as usize;
         Runs {
-            layout: self.layout_data,
+            layout_data: self.layout_data,
             iter: self.line_layout_data.runs[range].iter(),
         }
     }

@@ -20,9 +20,9 @@ use text::*;
 use std::borrow::Borrow;
 
 pub struct Compositor {
-    images: ImageCache,
-    glyphs: GlyphCache,
-    batches: BatchManager,
+    image_cache: ImageCache,
+    glyph_cache: GlyphCache,
+    batch_manager: BatchManager,
     epoch: Epoch,
     intercepts: Vec<(f32, f32)>,
 }
@@ -31,9 +31,9 @@ impl Compositor {
     /// Creates a new compositor.
     pub fn new(max_texture_size: u16) -> Self {
         Self {
-            images: ImageCache::new(max_texture_size),
-            glyphs: GlyphCache::new(),
-            batches: BatchManager::new(),
+            image_cache: ImageCache::new(max_texture_size),
+            glyph_cache: GlyphCache::new(),
+            batch_manager: BatchManager::new(),
             epoch: Epoch(0),
             intercepts: Vec::new(),
         }
@@ -41,16 +41,16 @@ impl Compositor {
 
     /// Advances the epoch for the compositor and clears all batches.
     pub fn begin(&mut self) {
-        self.glyphs.prune(self.epoch, &mut self.images);
+        self.glyph_cache.prune(self.epoch, &mut self.image_cache);
         self.epoch.0 += 1;
-        self.batches.reset();
+        self.batch_manager.reset();
     }
 
     /// Builds a display list for the current batched geometry and enumerates
     /// all texture events with the specified closure.
     pub fn finish(&mut self, list: &mut DisplayList, events: impl FnMut(TextureEvent)) {
-        self.images.drain_events(events);
-        self.batches.build_display_list(list);
+        self.image_cache.drain_events(events);
+        self.batch_manager.build_display_list(list);
     }
 }
 
@@ -58,17 +58,17 @@ impl Compositor {
 impl Compositor {
     /// Adds an image to the compositor.
     pub fn add_image(&mut self, request: AddImage) -> Option<ImageId> {
-        self.images.allocate(self.epoch, request)
+        self.image_cache.allocate(self.epoch, request)
     }
 
     /// Returns the image associated with the specified identifier.
     pub fn get_image(&mut self, image: ImageId) -> Option<ImageLocation> {
-        self.images.get(self.epoch, image)
+        self.image_cache.get(self.epoch, image)
     }
 
     /// Removes the image from the compositor.
     pub fn remove_image(&mut self, image: ImageId) -> bool {
-        self.images.deallocate(image).is_some()
+        self.image_cache.deallocate(image).is_some()
     }
 }
 
@@ -76,13 +76,13 @@ impl Compositor {
 impl Compositor {
     /// Draws a rectangle with the specified depth and color.
     pub fn draw_rect(&mut self, rect: impl Into<Rect>, depth: f32, color: Color) {
-        self.batches.add_rect(&rect.into(), depth, color);
+        self.batch_manager.add_rect(&rect.into(), depth, color);
     }
 
     /// Draws an image with the specified rectangle, depth and color.
     pub fn draw_image(&mut self, rect: impl Into<Rect>, depth: f32, color: Color, image: ImageId) {
-        if let Some(img) = self.images.get(self.epoch, image) {
-            self.batches.add_image_rect(
+        if let Some(img) = self.image_cache.get(self.epoch, image) {
+            self.batch_manager.add_image_rect(
                 &rect.into(),
                 depth,
                 color,
@@ -109,9 +109,9 @@ impl Compositor {
         if underline {
             self.intercepts.clear();
         }
-        let mut session = self.glyphs.session(
+        let mut session = self.glyph_cache.session(
             self.epoch,
-            &mut self.images,
+            &mut self.image_cache,
             style.font,
             style.font_coords,
             style.font_size,
@@ -127,7 +127,7 @@ impl Compositor {
                     let gx = (glyph.x + subpx_bias.0).floor() + entry.left as f32;
                     let gy = (glyph.y + subpx_bias.1).floor() - entry.top as f32;
                     if entry.is_bitmap {
-                        self.batches.add_image_rect(
+                        self.batch_manager.add_image_rect(
                             &Rect::new(gx, gy, entry.width as f32, entry.height as f32),
                             depth,
                             color::WHITE,
@@ -136,7 +136,7 @@ impl Compositor {
                             entry.image.has_alpha(),
                         );
                     } else {
-                        self.batches.add_mask_rect(
+                        self.batch_manager.add_mask_rect(
                             &Rect::new(gx, gy, entry.width as f32, entry.height as f32),
                             depth,
                             color,
@@ -166,7 +166,7 @@ impl Compositor {
             let uy = style.baseline - underline_offset as f32;
             for range in self.intercepts.iter() {
                 if ux < range.0 {
-                    self.batches.add_rect(&Rect::new(ux, uy, range.0 - ux, underline_size as f32), depth, underline_color);
+                    self.batch_manager.add_rect(&Rect::new(ux, uy, range.0 - ux, underline_size as f32), depth, underline_color);
                 }
                 ux = range.1;
             }

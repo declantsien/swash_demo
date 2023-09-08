@@ -117,9 +117,9 @@ impl<'a> GlyphCacheSession<'a> {
             subpx,
             size: self.quant_size,
         };
-        if let Some(entry) = self.entry.glyphs.get(&key) {
-            if self.images.is_valid(entry.image) {
-                return Some(*entry);
+        if let Some(glyph) = self.entry.glyphs.get(&key) {
+            if self.images.is_valid(glyph.image) {
+                return Some(*glyph);
             }
         }
         self.scaled_image.data.clear();
