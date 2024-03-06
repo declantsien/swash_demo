@@ -15,14 +15,40 @@ glutin = "0.30.3"
 glutin-winit = "0.3.0"
 winit = "0.28.6"
 raw-window-handle = "0.5.0"
+surfman = "0.8"
+tracing = "0.1"
+log = "0.4"
+gleam = "0.15.0"
 
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))'.dependencies]
 fontconfig-parser = "0.5"
 
+[dependencies.tracing-subscriber]
+version = "0.3"
+features = [
+  "matchers",
+  "regex",
+  "once_cell",
+  "tracing",
+  "std",
+  "thread_local",
+  "env-filter"
+]
+
 [dependencies.font]
 package = "font-index"
-version = "0.1"
+# version = "0.1"
+path = "/home/declan/src/Fonts/font-index"
+default-features = false
+
+[dependencies.webrender]
+# git = "https://github.com/declantsien/webrender.git"
+# rev = "b62669fee79af050a0b8e0d8a310da4e28e8b896"
+path = "/shared/src/webrender/webrender"
 default-features = false
 
 [build-dependencies]
 gl_generator = "0.14.0"
+
+# [[bin]]
+# name = "wrmain"

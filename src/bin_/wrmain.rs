@@ -1,97 +1,390 @@
-#![allow(dead_code, unused_variables, unused_imports, unused_mut)]
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-mod comp;
+#[path = "../doc/mod.rs"]
 mod doc;
-mod gfx;
+#[path = "../layout/mod.rs"]
 mod layout;
+#[path = "../util/mod.rs"]
 mod util;
+#[path = "../comp/mod.rs"]
+mod comp;
 
-use glutin::config::ConfigTemplateBuilder;
-use glutin::context::{ContextApi, ContextAttributesBuilder, Version};
-use glutin::display::GetGlDisplay;
-use glutin::prelude::{GlConfig, GlDisplay, NotCurrentGlContextSurfaceAccessor};
-use glutin::surface::{GlSurface, SurfaceAttributesBuilder};
-use glutin_winit::ApiPrefence;
-use raw_window_handle::HasRawWindowHandle;
-use winit::event::{Event, ModifiersState, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
-
-use comp::*;
 use comp::{color, color::Color};
-use gfx::gl;
-use layout::*;
 
-use std::env;
-use std::num::NonZeroU32;
+use font::FontIndex;
+use font::prelude::*;
+use gleam::gl;
+use winit::dpi::PhysicalSize;
+use winit::event::Event;
+use winit::event::ModifiersState;
+use winit::event::WindowEvent;
+use winit::event_loop::ControlFlow;
+use winit::window::CursorIcon;
+use std::rc::Rc;
 use std::time::Instant;
+use webrender::api::*;
+use webrender::api::units::*;
+use webrender::render_api::*;
+use webrender::FastHashMap;
+use webrender::DebugFlags;
+use winit::platform::run_return::EventLoopExtRunReturn;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-fn main() {
-    use clipboard2::Clipboard;
-    let clipboard = clipboard2::SystemClipboard::new().unwrap();
+use crate::layout::Alignment;
+use crate::layout::Direction;
+use crate::layout::ExtendTo;
+use crate::layout::LayoutContext;
+use crate::layout::Paragraph;
+use crate::layout::Selection;
 
-    let window_builder = WindowBuilder::new()
-        .with_transparent(false)
-        .with_resizable(true)
-        .with_inner_size(winit::dpi::PhysicalSize::new(1024, 768))
-        .with_title("Swash demo");
+struct Notifier {
+    events_proxy: winit::event_loop::EventLoopProxy<()>,
+}
 
-    if cfg!(target_os = "linux") {
-        // disables vsync sometimes on x11
-        if env::var("vblank_mode").is_err() {
-            env::set_var("vblank_mode", "0");
+impl Notifier {
+    fn new(events_proxy: winit::event_loop::EventLoopProxy<()>) -> Notifier {
+        Notifier { events_proxy }
+    }
+}
+
+impl RenderNotifier for Notifier {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
+        Box::new(Notifier {
+            events_proxy: self.events_proxy.clone(),
+        })
+    }
+
+    fn wake_up(&self, _composite_needed: bool) {
+        #[cfg(not(target_os = "android"))]
+        let _ = self.events_proxy.send_event(());
+    }
+
+    fn new_frame_ready(&self,
+                       _: DocumentId,
+                       _scrolled: bool,
+                       composite_needed: bool,
+                       _: FramePublishId) {
+        self.wake_up(composite_needed);
+    }
+}
+
+struct GlWindow {
+    window: winit::window::Window,
+    context: surfman::Context,
+    device: surfman::Device,
+    gl: Rc<dyn gl::Gl>,
+    renderer: Option<webrender::Renderer>,
+    name: &'static str,
+    pipeline_id: PipelineId,
+    document_id: DocumentId,
+    epoch: Epoch,
+    api: RenderApi,
+    font_instance_key: FontInstanceKey,
+}
+
+impl Drop for GlWindow {
+    fn drop(&mut self) {
+        self.device.destroy_context(&mut self.context).unwrap();
+        self.renderer.take().unwrap().deinit();
+    }
+}
+
+impl GlWindow {
+    fn new(event_loop: &winit::event_loop::EventLoop<()>, name: &'static str, clear_color: ColorF) -> Self {
+        let window_builder = winit::window::WindowBuilder::new()
+            .with_title(name)
+	    .with_inner_size(winit::dpi::PhysicalSize::new(1024, 768));
+        let window = window_builder.build(event_loop).unwrap();
+
+        let connection = surfman::Connection::from_winit_window(&window).unwrap();
+        let widget = connection.create_native_widget_from_winit_window(&window).unwrap();
+        let adapter = connection.create_adapter().unwrap();
+        let mut device = connection.create_device(&adapter).unwrap();
+        let (major, minor) = match device.gl_api() {
+            surfman::GLApi::GL => (3, 2),
+            surfman::GLApi::GLES => (3, 0),
+        };
+        let context_descriptor = device.create_context_descriptor(&surfman::ContextAttributes {
+            version: surfman::GLVersion {
+                major,
+                minor,
+            },
+            flags: surfman::ContextAttributeFlags::ALPHA |
+            surfman::ContextAttributeFlags::DEPTH |
+            surfman::ContextAttributeFlags::STENCIL,
+        }).unwrap();
+        let mut context = device.create_context(&context_descriptor, None).unwrap();
+        device.make_context_current(&context).unwrap();
+
+        let gl = match device.gl_api() {
+            surfman::GLApi::GL => unsafe {
+                gl::GlFns::load_with(
+                    |symbol| device.get_proc_address(&context, symbol) as *const _
+                )
+            },
+            surfman::GLApi::GLES => unsafe {
+                gl::GlesFns::load_with(
+                    |symbol| device.get_proc_address(&context, symbol) as *const _
+                )
+            },
+        };
+        let gl = gl::ErrorCheckingGl::wrap(gl);
+
+        let surface = device.create_surface(
+            &context,
+            surfman::SurfaceAccess::GPUOnly,
+            surfman::SurfaceType::Widget { native_widget: widget },
+        ).unwrap();
+        device.bind_surface_to_context(&mut context, surface).unwrap();
+
+        let opts = webrender::WebRenderOptions {
+            clear_color,
+            ..webrender::WebRenderOptions::default()
+        };
+
+        let device_size = {
+            let size = window
+                .inner_size();
+
+            DeviceIntSize::new(size.width as i32, size.height as i32)
+        };
+        let notifier = Box::new(Notifier::new(event_loop.create_proxy()));
+        let (renderer, sender) = webrender::create_webrender_instance(gl.clone(), notifier, opts, None).unwrap();
+        let mut api = sender.create_api();
+        let document_id = api.add_document(device_size);
+
+        let epoch = Epoch(0);
+        let pipeline_id = PipelineId(0, 0);
+        let mut txn = Transaction::new();
+
+        let font_key = api.generate_font_key();
+        let stretch = Stretch::NORMAL;
+        let style = Style::Normal;
+        let weight = Weight::NORMAL;
+        if let Some(font) = FontIndex::global().query(
+            "Droid Sans Mono",
+            swash::Attributes::new(stretch, weight, style),
+        ) {
+            txn.add_native_font(font_key, NativeFontHandle(font.id().0));
+            println!("font {:?} {:?}", font.family_name(), font.attributes());
+        }
+
+        let font_instance_key = api.generate_font_instance_key();
+        txn.add_font_instance(font_instance_key, font_key, 32.0, None, None, Vec::new());
+
+        api.send_transaction(document_id, txn);
+
+        GlWindow {
+            window,
+            device,
+            context,
+            renderer: Some(renderer),
+            name,
+            epoch,
+            pipeline_id,
+            document_id,
+            api,
+            font_instance_key,
+            gl,
         }
     }
 
-    let events = winit::event_loop::EventLoop::new();
+    pub fn id(&self) -> winit::window::WindowId {
+        self.window.id()
+    }
 
-    let (window, gl_config) = glutin_winit::DisplayBuilder::new()
-        .with_preference(ApiPrefence::FallbackEgl)
-        .with_window_builder(Some(window_builder))
-        .build(&events, ConfigTemplateBuilder::default(), |configs| {
-            configs
-                .filter(|c| c.srgb_capable())
-                .max_by_key(|c| c.num_samples())
-                .unwrap()
-        })
-        .unwrap();
+    fn set_flags(&mut self) {
+        println!("set flags {}", &self.name);
+        self.api.send_debug_cmd(DebugCommand::SetFlags(DebugFlags::PROFILER_DBG));
+    }
 
-    let window = window.unwrap(); // set in display builder
-    let raw_window_handle = window.raw_window_handle();
-    let gl_display = gl_config.display();
+    fn resize(&mut self, size: PhysicalSize<u32>) {
+        // todo!()
+    }
 
-    let context_attributes = ContextAttributesBuilder::new()
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 1))))
-        .with_profile(glutin::context::GlProfile::Core)
-        .build(Some(raw_window_handle));
+    pub fn scale_factor(&self) -> f64 {
+        self.window.scale_factor()
+    }
 
-    let dimensions = window.inner_size();
+    pub fn set_title(&self, title: &str) {
+        self.window.set_title(title)
+    }
 
-    let (gl_surface, gl_ctx) = {
-        let attrs = SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
-            raw_window_handle,
-            NonZeroU32::new(dimensions.width).unwrap(),
-            NonZeroU32::new(dimensions.height).unwrap(),
+    pub fn request_redraw(&self) {
+        self.window.request_redraw()
+    }
+
+    pub fn inner_size(&self) -> PhysicalSize<u32> {
+        self.window.inner_size()
+    }
+
+    pub fn set_cursor_icon(&self, cursor: CursorIcon) {
+        self.window.set_cursor_icon(cursor);
+    }
+
+    //TODO: enable rust log
+    fn redraw(&mut self) {
+        let renderer = self.renderer.as_mut().unwrap();
+        let api = &mut self.api;
+
+        self.device.make_context_current(&self.context).unwrap();
+
+        let device_pixel_ratio = self.window.scale_factor() as f32;
+        let device_size = {
+            let size = self
+                .window
+                .inner_size();
+            DeviceIntSize::new(size.width as i32, size.height as i32)
+        };
+        let layout_size = device_size.to_f32() / euclid::Scale::new(device_pixel_ratio);
+        let mut txn = Transaction::new();
+        let mut builder = DisplayListBuilder::new(self.pipeline_id);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(self.pipeline_id);
+        builder.begin();
+
+        let bounds = LayoutRect::from_size(layout_size);
+        builder.push_simple_stacking_context(
+            bounds.min,
+            space_and_clip.spatial_id,
+            PrimitiveFlags::IS_BACKFACE_VISIBLE,
         );
 
-        let surface = unsafe { gl_display.create_window_surface(&gl_config, &attrs) }.unwrap();
-        let context = unsafe { gl_display.create_context(&gl_config, &context_attributes) }
-            .unwrap()
-            .make_current(&surface)
-            .unwrap();
-        (surface, context)
-    };
+        builder.push_rect(
+            &CommonItemProperties::new(
+                LayoutRect::from_origin_and_size(
+                    LayoutPoint::new(100.0, 200.0),
+                    LayoutSize::new(100.0, 200.0),
+                ),
+                space_and_clip,
+            ),
+            LayoutRect::from_origin_and_size(
+                LayoutPoint::new(100.0, 200.0),
+                LayoutSize::new(100.0, 200.0),
+            ),
+            ColorF::new(0.0, 1.0, 0.0, 1.0));
 
-    // load
-    gfx::gl::load(&gl_display);
+        let text_bounds = LayoutRect::from_origin_and_size(
+            LayoutPoint::new(100.0, 50.0),
+            LayoutSize::new(700.0, 200.0)
+        );
+        let glyphs = vec![
+            GlyphInstance {
+                index: 48,
+                point: LayoutPoint::new(100.0, 100.0),
+            },
+            GlyphInstance {
+                index: 68,
+                point: LayoutPoint::new(150.0, 100.0),
+            },
+            GlyphInstance {
+                index: 80,
+                point: LayoutPoint::new(200.0, 100.0),
+            },
+            GlyphInstance {
+                index: 82,
+                point: LayoutPoint::new(250.0, 100.0),
+            },
+            GlyphInstance {
+                index: 81,
+                point: LayoutPoint::new(300.0, 100.0),
+            },
+            GlyphInstance {
+                index: 3,
+                point: LayoutPoint::new(350.0, 100.0),
+            },
+            GlyphInstance {
+                index: 86,
+                point: LayoutPoint::new(400.0, 100.0),
+            },
+            GlyphInstance {
+                index: 79,
+                point: LayoutPoint::new(450.0, 100.0),
+            },
+            GlyphInstance {
+                index: 72,
+                point: LayoutPoint::new(500.0, 100.0),
+            },
+            GlyphInstance {
+                index: 83,
+                point: LayoutPoint::new(550.0, 100.0),
+            },
+            GlyphInstance {
+                index: 87,
+                point: LayoutPoint::new(600.0, 100.0),
+            },
+            GlyphInstance {
+                index: 17,
+                point: LayoutPoint::new(650.0, 100.0),
+            },
+        ];
+
+        builder.push_text(
+            &CommonItemProperties::new(
+                text_bounds,
+                space_and_clip,
+            ),
+            text_bounds,
+            &glyphs,
+            self.font_instance_key,
+            ColorF::new(1.0, 1.0, 0.0, 1.0),
+            None,
+        );
+
+        builder.pop_stacking_context();
+
+        txn.set_display_list(
+            self.epoch,
+            builder.end(),
+        );
+        txn.set_root_pipeline(self.pipeline_id);
+        txn.generate_frame(0, RenderReasons::empty());
+        api.send_transaction(self.document_id, txn);
+
+        let framebuffer_object = self
+            .device
+            .context_surface_info(&self.context)
+            .unwrap()
+            .unwrap()
+            .framebuffer_object;
+        self.gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
+        assert_eq!(self.gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER), gl::FRAMEBUFFER_COMPLETE);
+
+        renderer.update();
+        renderer.render(device_size, 0).unwrap();
+
+        let mut surface = self.device.unbind_surface_from_context(&mut self.context).unwrap().unwrap();
+        self.device.present_surface(&self.context, &mut surface).unwrap();
+        self.device.bind_surface_to_context(&mut self.context, surface).unwrap();
+    }
+}
+
+fn main() {
+    // install global collector configured based on EMACSNG_LOG env var.
+    #[cfg(debug_assertions)]
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_env("RUST_LOG"))
+        .init();
+
+    log::trace!("log");
+
+    use clipboard2::Clipboard;
+    let clipboard = clipboard2::SystemClipboard::new().unwrap();
+
+    let mut event_loop = winit::event_loop::EventLoop::new();
+    let mut windows = FastHashMap::default();
+
+    let gl_window1 = GlWindow::new(&event_loop, "Swash demo", ColorF::new(0.3, 0.0, 0.0, 1.0));
 
     const MARGIN: f32 = 12.;
     let mut keymods = winit::event::ModifiersState::default();
-    let mut dpi = window.scale_factor() as f32;
+    let mut dpi = gl_window1.scale_factor() as f32;
     let mut margin = MARGIN * dpi;
     let fonts = layout::FontLibrary::default();
     let mut layout_context = LayoutContext::new(&fonts);
-    let initial_size = window.inner_size();
+    let initial_size = gl_window1.inner_size();
     let mut paragraph = Paragraph::new();
     let mut doc = build_document();
     // println!("{:?}", &doc);
@@ -115,32 +408,31 @@ fn main() {
     let mut needs_update = true;
     let mut size_changed = true;
     let mut dark_mode = false;
-    let mut device = gfx::Device::new();
-    let mut comp = comp::Compositor::new(2048);
-    let mut dlist = comp::DisplayList::new();
     let mut align = Alignment::Start;
     let mut always_update = false;
 
-    window.set_cursor_icon(winit::window::CursorIcon::Text);
+    // win1.set_cursor_icon(winit::window::CursorIcon::Text);
 
-    // let quad = gfx::FullscreenQuad::new();
-    events.run(move |event, _, control_flow| {
-        //println!("{:?}", event);
-        *control_flow = ControlFlow::Poll;
+    let win1_id = gl_window1.id();
+    windows.insert(win1_id, gl_window1);
+
+    event_loop.run_return(|event, _elwt, control_flow| {
+        *control_flow = winit::event_loop::ControlFlow::Wait;
+    // event_loop.run(move |event, _, control_flow| {
+    //     //println!("{:?}", event);
+    //     *control_flow = ControlFlow::Poll;
         match event {
             Event::LoopDestroyed => return,
-            Event::WindowEvent { event, .. } => match event {
+            Event::WindowEvent { event, window_id } => match event {
                 WindowEvent::Resized(physical_size) => {
-                    gl_surface.resize(
-                        &gl_ctx,
-                        NonZeroU32::new(physical_size.width).unwrap(),
-                        NonZeroU32::new(physical_size.height).unwrap(),
-                    );
+                    let window: &mut GlWindow = windows.get_mut(&window_id).unwrap();
+                    window.resize(physical_size);
                     selection_changed = true;
                     size_changed = true;
                 }
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                    let window: &mut GlWindow = windows.get_mut(&window_id).unwrap();
                     dpi = scale_factor as f32;
                     margin = MARGIN * dpi;
                     needs_update = true;
@@ -223,6 +515,7 @@ fn main() {
                     }
                 }
                 WindowEvent::KeyboardInput { input, .. } => {
+                    let window: &mut GlWindow = windows.get_mut(&window_id).unwrap();
                     use winit::event::{ElementState, VirtualKeyCode, VirtualKeyCode::*};
                     if input.state != ElementState::Pressed {
                         return;
@@ -409,9 +702,10 @@ fn main() {
                 _ => (),
             },
             Event::MainEventsCleared => {
-                window.request_redraw();
+                // gl_window1.window.request_redraw();
             }
-            Event::RedrawRequested(_) => {
+            Event::RedrawRequested(window_id) => {
+                let window: &mut GlWindow = windows.get_mut(&window_id).unwrap();
                 let cur_time = Instant::now();
                 let dt = cur_time.duration_since(last_time).as_secs_f32();
                 last_time = cur_time;
@@ -456,7 +750,7 @@ fn main() {
                     doc.layout(&mut lb);
                     paragraph.clear();
                     lb.build_into(&mut paragraph);
-                    // println!("paragraph {:?}", &paragraph);
+                    println!("paragraph {:?}", &paragraph);
                     if first_run {
                         selection = Selection::from_point(&paragraph, 0., 0.);
                     }
@@ -491,100 +785,28 @@ fn main() {
                     (color::BLACK, color::WHITE)
                 };
 
-                comp.begin();
-                draw_layout(&mut comp, &paragraph, margin, margin, 512., fg);
+                // draw_layout(&mut comp, &paragraph, margin, margin, 512., fg);
 
-                for r in &selection_rects {
-                    let rect = [r[0] + margin, r[1] + margin, r[2], r[3]];
-                    if dark_mode {
-                        comp.draw_rect(rect, 600., Color::new(38, 79, 120, 255));
-                    } else {
-                        comp.draw_rect(rect, 600., Color::new(179, 215, 255, 255));
-                    }
-                }
+                // for r in &selection_rects {
+                //     let rect = [r[0] + margin, r[1] + margin, r[2], r[3]];
+                //     if dark_mode {
+                //         comp.draw_rect(rect, 600., Color::new(38, 79, 120, 255));
+                //     } else {
+                //         comp.draw_rect(rect, 600., Color::new(179, 215, 255, 255));
+                //     }
+                // }
 
-                let (pt, ch, rtl) = selection.cursor(&paragraph);
-                if ch != 0. && cursor_on {
-                    let rect = [pt[0].round() + margin, pt[1].round() + margin, 1. * dpi, ch];
-                    comp.draw_rect(rect, 0.1, fg);
-                }
-                dlist.clear();
-                device.finish_composition(&mut comp, &mut dlist);
-
-                unsafe {
-                    gl::Viewport(0, 0, w as i32, h as i32);
-                    let cc = bg.to_rgba_f32();
-                    gl::ClearColor(cc[0], cc[1], cc[2], 1.0);
-                    gl::ClearDepth(1.0);
-                    gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-                    gl::Enable(gl::DEPTH_TEST);
-                    gl::DepthFunc(gl::LESS);
-                    gl::DepthMask(1);
-                    device.render(w, h, &dlist);
-                    gl::Flush();
-                }
-                gl_surface.swap_buffers(&gl_ctx).unwrap();
+                // let (pt, ch, rtl) = selection.cursor(&paragraph);
+                // if ch != 0. && cursor_on {
+                //     let rect = [pt[0].round() + margin, pt[1].round() + margin, 1. * dpi, ch];
+                //     comp.draw_rect(rect, 0.1, fg);
+                // }
+                window.redraw();
             }
             _ => (),
         }
     });
-}
 
-fn draw_layout(
-    comp: &mut comp::Compositor,
-    paragraph: &Paragraph,
-    x: f32,
-    y: f32,
-    depth: f32,
-    color: Color,
-) {
-    let mut positioned_glyphs = Vec::new();
-    for line in paragraph.lines() {
-        let mut px = x + line.offset();
-        for run in line.runs() {
-            use comp::text::*;
-            use comp::*;
-            let font = run.font();
-            let py = line.baseline() + y;
-            let run_x = px;
-            positioned_glyphs.clear();
-            for cluster in run.visual_clusters() {
-                for glyph in cluster.glyphs() {
-                    let x = px + glyph.x;
-                    let y = py - glyph.y;
-                    px += glyph.advance;
-                    positioned_glyphs.push(PositionedGlyph { id: glyph.id, x, y });
-                }
-            }
-            let style = TextRunStyle {
-                font: font.as_ref(),
-                font_coords: run.normalized_coords(),
-                font_size: run.font_size(),
-                color,
-                baseline: py,
-                advance: px - run_x,
-                underline: if run.underline() {
-                    Some(UnderlineStyle {
-                        offset: run.underline_offset(),
-                        size: run.underline_size(),
-                        color,
-                    })
-                } else {
-                    None
-                },
-            };
-	    // println!("rect x: {}, y: {}, width: {}, height: {}", run_x, py, style.advance, 1.);
-	    // println!("depth: {}", depth);
-	    // println!("style: {:?}", &style.font_coords);
-	    // println!("glyphs: {:?}", &glyphs);
-            comp.draw_glyphs(
-                Rect::new(run_x, py, style.advance, 1.),
-                depth,
-                &style,
-                positioned_glyphs.iter(),
-            );
-        }
-    }
 }
 
 fn build_document() -> doc::Document {
@@ -638,7 +860,7 @@ fn build_document() -> doc::Document {
     db.enter_span(&[S::family_list("verdana, sans-serif"), S::LineSpacing(1.)]);
     db.add_text("A true ");
     db.enter_span(&[S::Size(48.)]);
-    db.add_text("🕵🏽‍♀️😶‍🌫️");
+    db.add_text("🕵🏽‍♀️");
     db.leave_span();
     db.add_text(" will spot the tricky selection in this BiDi text: ");
     db.enter_span(&[S::Size(22.)]);
